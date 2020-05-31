@@ -1,0 +1,9 @@
+<resources>
+    <string name="app_name">HealthMeasurement</string>
+    <string name="textView1">Wyszukaj urządzenie </string>
+    <string name="button1">Wyszukaj urządzenia BLE!</string>
+    <string name="connectButton">Połącz</string>
+    <string name="pulseText">PULSE:</string>
+    <string name="status">"  Connection state:"</string>
+    <string name="statusView">" Disconnected"</string>
+</resources>

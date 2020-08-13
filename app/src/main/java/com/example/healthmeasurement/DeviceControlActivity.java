@@ -12,20 +12,28 @@ import android.content.ServiceConnection;
 import android.graphics.Color;
 import android.net.ConnectivityManager;
 import android.net.NetworkInfo;
-import android.os.AsyncTask;
 import android.os.Bundle;
 import android.os.Handler;
 import android.os.IBinder;
 import android.util.Log;
 import android.view.View;
 import android.widget.TextView;
-import java.io.PrintWriter;
-import java.net.Socket;
+
+import com.jjoe64.graphview.DefaultLabelFormatter;
+import com.jjoe64.graphview.GraphView;
+import com.jjoe64.graphview.GridLabelRenderer;
+import com.jjoe64.graphview.series.DataPoint;
+import com.jjoe64.graphview.series.LineGraphSeries;
+
+import java.text.SimpleDateFormat;
+import java.util.ArrayList;
+import java.util.Date;
 import java.util.List;
 
 public class DeviceControlActivity extends Activity {
 
     private final static String TAG = DeviceControlActivity.class.getSimpleName();
+    public boolean onCreate;
     private BluetoothLEService mBluetoothLeService;
     private String mDeviceName;
     private String mDeviceAddress;
@@ -34,8 +42,12 @@ public class DeviceControlActivity extends Activity {
     public static final String EXTRAS_DEVICE_ADDRESS = "DEVICE_ADDRESS";
     private TextView mConnectionState;
     private TextView pulse;
+    private GraphView graph;
     private BluetoothGattCharacteristic blunoCharacteristic;
     private BluetoothGattCharacteristic mNotifyCharacteristic;
+    private int i;
+    private ArrayList<DataPoint> pointsArray= new ArrayList(){};
+    SimpleDateFormat sdf = new SimpleDateFormat("hh:mm:ss");
 
     private final ServiceConnection mServiceConnection = new ServiceConnection() {
 
@@ -59,9 +71,37 @@ public class DeviceControlActivity extends Activity {
     @Override
     public void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
+        onCreate=true;
         setContentView(R.layout.activity_device_control);
         mConnectionState = findViewById(R.id.mConnectionState);
         pulse = findViewById(R.id.myImageViewText);
+        graph = findViewById(R.id.graph);
+        graph.getGridLabelRenderer().setGridStyle(GridLabelRenderer.GridStyle.NONE );
+        graph.getGridLabelRenderer().setGridColor(Color.RED);
+        graph.getViewport().setDrawBorder(true);
+        graph.getGridLabelRenderer().setVerticalLabelsColor(Color.WHITE);
+        graph.getGridLabelRenderer().setHorizontalLabelsColor(Color.WHITE);
+        graph.getGridLabelRenderer().reloadStyles();
+        graph.getViewport().setMinY(20);
+        graph.getViewport().setMaxY(200);
+        graph.getViewport().setYAxisBoundsManual(true);
+        //graph.getViewport().setXAxisBoundsManual(true);
+        graph.getGridLabelRenderer().setLabelFormatter(new DefaultLabelFormatter(){
+            @Override
+            public String formatLabel(double value,boolean isValueX){
+                if(isValueX){
+                    System.out.println("DATA!!!!!");
+                    System.out.println(value);
+                    return sdf.format(new Date((long) value));
+                }
+                else{
+                    return super.formatLabel(value,isValueX);
+                }
+            }
+        });
+        graph.getGridLabelRenderer().setNumHorizontalLabels(4);
+        //graph.getViewport().setMaxX(new Date().getTime());
+
         registerReceiver(mGattUpdateReceiver,makeGattUpdateIntentFilter());
         registerReceiver(connectionStateReceiver,makeStateConnectionUpdateIntentFilter());
 
@@ -82,6 +122,11 @@ public class DeviceControlActivity extends Activity {
             final boolean result = mBluetoothLeService.connect(mDeviceAddress);
             Log.d(TAG, "Connect request result=" + result);
         }
+        if(onCreate){
+            onCreate=false;
+            return;
+        }
+        drawGraph();
     }
 
     @Override
@@ -130,14 +175,12 @@ public class DeviceControlActivity extends Activity {
             if (BluetoothLEService.ACTION_GATT_CONNECTED.equals(action)) {
                 mConnected = true;
                 mConnectionState.setText(" Connected");
-                mConnectionState.setTextColor(Color.GREEN);
-
 
             } else if (BluetoothLEService.ACTION_GATT_DISCONNECTED.equals(action)) {
                 mConnected = false;
                 pulse.setText("0");
                 mConnectionState.setText(" Disconnected");
-                mConnectionState.setTextColor(Color.RED);
+
             } else if (BluetoothLEService.ACTION_GATT_SERVICES_DISCOVERED.equals(action)) {
 
                 List<BluetoothGattService> gattServices = mBluetoothLeService.getSupportedGattServices();
@@ -160,8 +203,10 @@ public class DeviceControlActivity extends Activity {
 
             } else if (BluetoothLEService.ACTION_DATA_AVAILABLE.equals(action)) {
                 final String data = intent.getStringExtra(BluetoothLEService.EXTRA_DATA);
-                displayData(data);
-
+                if(data.length()>1){
+                    displayData(data);
+                    drawGraph();
+                }
             }
         }
     };
@@ -195,6 +240,20 @@ public class DeviceControlActivity extends Activity {
         }
     };
 
+    public void drawGraph(){
+
+        pointsArray = mBluetoothLeService.getPointsArray();
+        DataPoint[] dataPoints = new DataPoint[pointsArray.size()];
+        for(int z =0;z<pointsArray.size();z++){
+            dataPoints[z]=pointsArray.get(z);
+        }
+        LineGraphSeries<DataPoint> pa = new LineGraphSeries<>(dataPoints);
+        pa.setColor(Color.RED);
+        //graph.getViewport().setMaxX(new Date().getTime());
+        graph.addSeries(pa);
+
+
+    }
 
 }
 

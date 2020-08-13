@@ -66,7 +66,6 @@ public class MainActivity extends AppCompatActivity {
                     }
 
                     startActivity(intent);
-                    //Intent serviceIntent = Intent(this,Blue)
 
                 }
             });
@@ -115,10 +114,10 @@ public class MainActivity extends AppCompatActivity {
         }
 
         if(bluetoothAdapter.isEnabled()==true){
-            bleScanner = new ScanLeDevices(bluetoothAdapter, new Handler());
+            bleScanner = new ScanLeDevices(bluetoothAdapter, new Handler(),button);
             leDevicesListAdapter.clear();
             leDevicesListAdapter.notifyDataSetChanged();
-            bleScanner.scanLeDevice(true,button,mScanCallback);
+            bleScanner.scanLeDevice(true,mScanCallback);
             button.setText("Wyszukiwanie");
             Toast.makeText(this, "Wyszukiwanie... Czekaj na zakończenie", Toast.LENGTH_LONG).show();
         }

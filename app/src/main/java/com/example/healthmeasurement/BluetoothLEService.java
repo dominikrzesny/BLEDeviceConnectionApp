@@ -20,6 +20,10 @@ import android.os.Handler;
 import android.os.IBinder;
 import android.os.StrictMode;
 import android.util.Log;
+
+import com.jjoe64.graphview.series.DataPoint;
+import com.jjoe64.graphview.series.LineGraphSeries;
+
 import java.io.BufferedReader;
 import java.io.DataInputStream;
 import java.io.File;
@@ -32,7 +36,9 @@ import java.io.InputStreamReader;
 import java.io.OutputStream;
 import java.io.PrintWriter;
 import java.net.Socket;
+import java.util.ArrayList;
 import java.util.Calendar;
+import java.util.Date;
 import java.util.List;
 import java.util.UUID;
 
@@ -51,6 +57,8 @@ public class BluetoothLEService extends Service {
     private boolean isFileEmpty;
     Socket socket = null;
     PrintWriter printWriter = null;
+    private int i=0;
+    private ArrayList<DataPoint> pointsArray= new ArrayList(){};
 
     private static final int STATE_DISCONNECTED = 0;
     private static final int STATE_CONNECTING = 1;
@@ -115,6 +123,15 @@ public class BluetoothLEService extends Service {
                 public void onCharacteristicChanged(BluetoothGatt gatt,
                                                     BluetoothGattCharacteristic characteristic) {
                     broadcastUpdate(ACTION_DATA_AVAILABLE, characteristic);
+
+                    //dodanie wartosci pulsu do puli punktow do narysowania
+                    String pulse = new String(characteristic.getValue());
+                    pulse = pulse.substring(0, pulse.length() - 2);
+                    int x = Integer.parseInt(pulse);
+                    if(x<200 && x>20){
+                        pointsArray.add(new DataPoint(new Date().getTime(),x));
+                    }
+
                     if(!isNetworkAvailable()){
                         generateNoteOnSD(new String(characteristic.getValue()));
                     }
@@ -143,13 +160,12 @@ public class BluetoothLEService extends Service {
         Log.v("AndroidLE", "data.length: " + data.length);
 
         if (data != null && data.length > 0) {
-            /*final StringBuilder stringBuilder = new StringBuilder(data.length);
-            for(byte byteChar : data) {
-                stringBuilder.append(String.format("%02X ", byteChar));
 
-                Log.v("AndroidLE", String.format("%02X ", byteChar));
-            }*/
             String pulse = new String(data);
+            if(pulse.length()==1){
+                return;
+            }
+            pulse = pulse.substring(0, pulse.length() - 2);
             intent.putExtra(EXTRA_DATA, pulse);
         }
 
@@ -249,6 +265,10 @@ public class BluetoothLEService extends Service {
         return mBluetoothGatt.getServices();
     }
 
+    public ArrayList<DataPoint> getPointsArray(){
+        return pointsArray;
+    }
+
     /**
      * After using a given BLE device, the app must call this method to ensure resources are
      * released properly.
@@ -345,7 +365,7 @@ public class BluetoothLEService extends Service {
             return;
         }
         pulse = pulse.substring(0, pulse.length() - 2);
-        new SendDataToServer().execute(pulse);
+        //new SendDataToServer().execute(pulse);
     }
 
 
@@ -360,7 +380,7 @@ public class BluetoothLEService extends Service {
                     if(strings[0]==""){
                         return null;
                     }
-                socket = new Socket("192.168.0.106", 8000); // adres IP serwera i jego numer portu
+                socket = new Socket("192.168.0.101", 8000); // adres IP serwera i jego numer portu
                 System.out.println("Connected...");
 
                 OutputStream outputStream = socket.getOutputStream();
@@ -368,7 +388,7 @@ public class BluetoothLEService extends Service {
                 printWriter.println(strings[0]);
                 }
                 else{
-                    socket = new Socket("192.168.0.106", 8000); // adres IP serwera i jego numer portu
+                    socket = new Socket("192.168.0.101", 8000); // adres IP serwera i jego numer portu
                     System.out.println("Connected...");
 
                     OutputStream outputStream = socket.getOutputStream();
@@ -384,6 +404,7 @@ public class BluetoothLEService extends Service {
                     while ((strLine = br.readLine()) != null) {
                         printWriter.println(strLine);
                     }
+                    printWriter.println(strings[0]);  //28.07 // nie testowane
                     in.close();
                     FileOutputStream fos = new FileOutputStream(myExternalFile);
                     fos.write("".getBytes());

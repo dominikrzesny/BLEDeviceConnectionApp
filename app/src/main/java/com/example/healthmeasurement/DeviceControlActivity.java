@@ -65,6 +65,7 @@ public class DeviceControlActivity extends Activity {
         @Override
         public void onServiceDisconnected(ComponentName componentName) {
             mBluetoothLeService = null;
+            System.out.println("Odlaczylem serwis");
         }
     };
 
@@ -90,8 +91,6 @@ public class DeviceControlActivity extends Activity {
             @Override
             public String formatLabel(double value,boolean isValueX){
                 if(isValueX){
-                    System.out.println("DATA!!!!!");
-                    System.out.println(value);
                     return sdf.format(new Date((long) value));
                 }
                 else{
@@ -181,6 +180,7 @@ public class DeviceControlActivity extends Activity {
                 pulse.setText("0");
                 mConnectionState.setText(" Disconnected");
 
+
             } else if (BluetoothLEService.ACTION_GATT_SERVICES_DISCOVERED.equals(action)) {
 
                 List<BluetoothGattService> gattServices = mBluetoothLeService.getSupportedGattServices();
@@ -203,7 +203,7 @@ public class DeviceControlActivity extends Activity {
 
             } else if (BluetoothLEService.ACTION_DATA_AVAILABLE.equals(action)) {
                 final String data = intent.getStringExtra(BluetoothLEService.EXTRA_DATA);
-                if(data.length()>1){
+                if(data.length()>0){
                     displayData(data);
                     drawGraph();
                 }
@@ -222,14 +222,21 @@ public class DeviceControlActivity extends Activity {
                 if (ni != null && ni.isConnectedOrConnecting()) {
                     Log.i(TAG, "Network " + ni.getTypeName() + " connected");
 
-                    final Handler handler = new Handler();
-                    handler.postDelayed(new Runnable() {
-                        @Override
-                        public void run() {
-                            mBluetoothLeService.sendPulseToServer("");
-                            //mBluetoothLeService.sendAllOldMeasurements();
-                        }
-                    }, 100);
+                    if(ni.getTypeName().toString().equals("WIFI")){
+
+
+
+                        final Handler handler = new Handler();
+                        handler.postDelayed(new Runnable() {
+                            @Override
+                            public void run() {
+                                mBluetoothLeService.sendPulseToServer("ConnectionActivated");
+                                if(mBluetoothLeService.isMqttServerConnected==false){
+                                    mBluetoothLeService.connectToMqttServer();
+                                }
+                            }
+                        }, 100);
+                    }
 
 
                 } else if (intent.getBooleanExtra(ConnectivityManager.EXTRA_NO_CONNECTIVITY, Boolean.FALSE)) {

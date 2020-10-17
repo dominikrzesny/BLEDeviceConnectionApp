@@ -6,7 +6,6 @@ import android.bluetooth.BluetoothDevice;
 import android.bluetooth.BluetoothGatt;
 import android.bluetooth.BluetoothGattCallback;
 import android.bluetooth.BluetoothGattCharacteristic;
-import android.bluetooth.BluetoothGattDescriptor;
 import android.bluetooth.BluetoothGattService;
 import android.bluetooth.BluetoothManager;
 import android.bluetooth.BluetoothProfile;
@@ -14,16 +13,18 @@ import android.content.Context;
 import android.content.Intent;
 import android.net.ConnectivityManager;
 import android.net.NetworkInfo;
+import android.net.wifi.WifiManager;
 import android.os.AsyncTask;
 import android.os.Binder;
-import android.os.Handler;
 import android.os.IBinder;
-import android.os.StrictMode;
 import android.util.Log;
-
 import com.jjoe64.graphview.series.DataPoint;
-import com.jjoe64.graphview.series.LineGraphSeries;
-
+import org.eclipse.paho.android.service.MqttAndroidClient;
+import org.eclipse.paho.client.mqttv3.IMqttActionListener;
+import org.eclipse.paho.client.mqttv3.IMqttToken;
+import org.eclipse.paho.client.mqttv3.MqttClient;
+import org.eclipse.paho.client.mqttv3.MqttException;
+import org.eclipse.paho.client.mqttv3.MqttMessage;
 import java.io.BufferedReader;
 import java.io.DataInputStream;
 import java.io.File;
@@ -33,16 +34,13 @@ import java.io.FileOutputStream;
 import java.io.FileWriter;
 import java.io.IOException;
 import java.io.InputStreamReader;
-import java.io.OutputStream;
-import java.io.PrintWriter;
-import java.net.Socket;
+import java.io.UnsupportedEncodingException;
 import java.util.ArrayList;
 import java.util.Calendar;
 import java.util.Date;
 import java.util.List;
 import java.util.UUID;
 
-import javax.xml.transform.Source;
 
 import static android.content.ContentValues.TAG;
 
@@ -55,8 +53,10 @@ public class BluetoothLEService extends Service {
     private int mConnectionState = STATE_DISCONNECTED;
     private final IBinder mBinder = new LocalBinder();
     private boolean isFileEmpty;
-    Socket socket = null;
-    PrintWriter printWriter = null;
+    public boolean isMqttServerConnected = false;
+    MqttAndroidClient client;
+    String clientId;
+    //PrintWriter printWriter = null;
     private int i=0;
     private ArrayList<DataPoint> pointsArray= new ArrayList(){};
 
@@ -77,6 +77,7 @@ public class BluetoothLEService extends Service {
 
     public final static UUID UUID_HEART_RATE_MEASUREMENT =
             UUID.fromString(SampleGattAttributes.BLUNO);
+
 
     private final BluetoothGattCallback gattCallback =
             new BluetoothGattCallback() {
@@ -126,24 +127,23 @@ public class BluetoothLEService extends Service {
 
                     //dodanie wartosci pulsu do puli punktow do narysowania
                     String pulse = new String(characteristic.getValue());
-                    pulse = pulse.substring(0, pulse.length() - 2);
                     int x = Integer.parseInt(pulse);
-                    if(x<200 && x>20){
+                    if(x<=200 && x>=20){
                         pointsArray.add(new DataPoint(new Date().getTime(),x));
                     }
 
-                    if(!isNetworkAvailable()){
+                    if(!isNetworkAvailable() || client.isConnected()==false){
+                        isMqttServerConnected = false;
                         generateNoteOnSD(new String(characteristic.getValue()));
                     }
                     else{
-                        System.out.println("Zajebioza");
+                        isMqttServerConnected = true;
                         sendPulseToServer(new String(characteristic.getValue()));
                     }
                     Log.w(TAG,"onCharacteristicChanged");
                 }
 
             };
-
 
     private void broadcastUpdate(final String action) {
         final Intent intent = new Intent(action);
@@ -162,10 +162,10 @@ public class BluetoothLEService extends Service {
         if (data != null && data.length > 0) {
 
             String pulse = new String(data);
+
             if(pulse.length()==1){
                 return;
             }
-            pulse = pulse.substring(0, pulse.length() - 2);
             intent.putExtra(EXTRA_DATA, pulse);
         }
 
@@ -284,14 +284,12 @@ public class BluetoothLEService extends Service {
 
     @Override
     public IBinder onBind(Intent intent) {
+        connectToMqttServer();
         return mBinder;
     }
 
     @Override
     public boolean onUnbind(Intent intent) {
-        // After using a given device, you should make sure that BluetoothGatt.close() is called
-        // such that resources are cleaned up properly.  In this particular example, close() is
-        // invoked when the UI is disconnected from the Service.
         close();
         return super.onUnbind(intent);
     }
@@ -307,8 +305,8 @@ public class BluetoothLEService extends Service {
         try {
                 File myExternalFile = new File(getFilesDir(), "Heart_measurement.txt");
                 try {
-                    pulse = pulse.substring(0, pulse.length() - 2);
-                    String sBody = pulse + " " + Calendar.getInstance().getTime()+"\n";
+                    //pulse = pulse.substring(0, pulse.length() - 2);
+                    String sBody = pulse + " " + System.currentTimeMillis()+"\n";
                     System.out.println(sBody);
                     FileWriter fw = new FileWriter(myExternalFile, true);
                     fw.append(sBody);
@@ -352,59 +350,92 @@ public class BluetoothLEService extends Service {
     }
 
     public boolean isNetworkAvailable() {
+        WifiManager wifiManager = (WifiManager) getSystemService(Context.WIFI_SERVICE);
         ConnectivityManager connectivityManager
                 = (ConnectivityManager) getSystemService(Context.CONNECTIVITY_SERVICE);
         NetworkInfo activeNetworkInfo = connectivityManager.getActiveNetworkInfo();
-        return activeNetworkInfo != null && activeNetworkInfo.isConnected();
+        return activeNetworkInfo != null && activeNetworkInfo.isConnected() && wifiManager.isWifiEnabled();
+    }
+
+    public void publishPulse(String pulse,String timeMilis){
+        String payload="{\"Pulse\": "+pulse+", \"time\": "+ timeMilis+"}";
+        byte[] encodedPayload;
+        try {
+            encodedPayload = payload.getBytes("UTF-8");
+            MqttMessage message = new MqttMessage();
+            message.setPayload(encodedPayload);
+            client.publish("Sensor/pulse", message);
+        } catch (UnsupportedEncodingException | MqttException e) {
+            e.printStackTrace();
+        }
+    }
+
+    public void connectToMqttServer(){
+        clientId = MqttClient.generateClientId();
+        client = new MqttAndroidClient(this.getApplicationContext(), "tcp://192.168.0.122:1883",
+                clientId);
+        try {
+            IMqttToken token = client.connect();
+            token.setActionCallback(new IMqttActionListener() {
+                @Override
+                public void onSuccess(IMqttToken asyncActionToken) {
+                    // We are connected
+                    Log.d(TAG, "onSuccess mqtt connect");
+                    isMqttServerConnected = true;
+                }
+
+                @Override
+                public void onFailure(IMqttToken asyncActionToken, Throwable exception) {
+                    // Something went wrong e.g. connection timeout or firewall problems
+                    Log.d(TAG, "onFailure");
+                    isMqttServerConnected=false;
+
+                }
+            });
+        } catch (MqttException e) {
+            e.printStackTrace();
+        }
     }
 
 
     public void sendPulseToServer(String data){
         String pulse = data;
-        if(pulse==""){
+        System.out.println("WYSYLAM DANE DO SERWERA: "+data);
+        if(pulse=="" || client.isConnected()==false){
             return;
         }
-        pulse = pulse.substring(0, pulse.length() - 2);
-        //new SendDataToServer().execute(pulse);
+        new SendDataToServer().execute(pulse);
     }
 
 
     private class SendDataToServer extends AsyncTask<String,Void,Void> {
         @Override
         protected Void doInBackground(String... strings) {
-
             File myExternalFile = new File(getFilesDir(), "Heart_measurement.txt");
             isFileEmpty = myExternalFile.length() == 0;
             try {
                 if(isFileEmpty){
-                    if(strings[0]==""){
+                    if(strings[0]=="ConnectionActivated"){
                         return null;
                     }
-                socket = new Socket("192.168.0.101", 8000); // adres IP serwera i jego numer portu
-                System.out.println("Connected...");
+                    publishPulse(strings[0],Double.toString(System.currentTimeMillis()));
 
-                OutputStream outputStream = socket.getOutputStream();
-                printWriter = new PrintWriter(outputStream, true);
-                printWriter.println(strings[0]);
                 }
                 else{
-                    socket = new Socket("192.168.0.101", 8000); // adres IP serwera i jego numer portu
-                    System.out.println("Connected...");
-
-                    OutputStream outputStream = socket.getOutputStream();
-                    printWriter = new PrintWriter(outputStream, true);
 
                     FileInputStream fis = null;
-
                     fis = new FileInputStream(myExternalFile);
                     DataInputStream in = new DataInputStream(fis);
                     BufferedReader br =
                             new BufferedReader(new InputStreamReader(in));
                     String strLine;
                     while ((strLine = br.readLine()) != null) {
-                        printWriter.println(strLine);
+                        String[] splited = strLine.split(" ");
+                        publishPulse(splited[0],splited[1]);
                     }
-                    printWriter.println(strings[0]);  //28.07 // nie testowane
+                    if(strings[0]!="ConnectionActivated"){
+                        publishPulse(strings[0],Double.toString(System.currentTimeMillis()));
+                    }
                     in.close();
                     FileOutputStream fos = new FileOutputStream(myExternalFile);
                     fos.write("".getBytes());
@@ -416,17 +447,6 @@ public class BluetoothLEService extends Service {
                 generateNoteOnSD(strings[0]);
             } finally {
 
-                if (printWriter != null) {
-                    printWriter.close();
-                }
-
-                if (socket != null) {
-                    try {
-                        socket.close();
-                    } catch (IOException ex) {
-                        System.out.println(ex.toString());
-                    }
-                }
             }
 
             return null;

@@ -54,8 +54,8 @@ public class BluetoothLEService extends Service {
     private final IBinder mBinder = new LocalBinder();
     private boolean isFileEmpty;
     public boolean isMqttServerConnected = false;
-    MqttAndroidClient client;
-    String clientId;
+    private MqttAndroidClient client;
+    private String clientId;
     //PrintWriter printWriter = null;
     private int i=0;
     private ArrayList<DataPoint> pointsArray= new ArrayList(){};
@@ -74,7 +74,10 @@ public class BluetoothLEService extends Service {
             "com.example.bluetooth.le.ACTION_DATA_AVAILABLE";
     public final static String EXTRA_DATA =
             "com.example.bluetooth.le.EXTRA_DATA";
-
+    public final static String MQTT_CONNECTED =
+            "com.example.mqtt.MQTT_CONNECTED";
+    public final static String MQTT_DISCONNECTED =
+            "com.example.mqtt.MQTT_DISCONNECTED";
     public final static UUID UUID_HEART_RATE_MEASUREMENT =
             UUID.fromString(SampleGattAttributes.BLUNO);
 
@@ -132,12 +135,10 @@ public class BluetoothLEService extends Service {
                         pointsArray.add(new DataPoint(new Date().getTime(),x));
                     }
 
-                    if(!isNetworkAvailable() || client.isConnected()==false){
-                        isMqttServerConnected = false;
+                    if(!isNetworkAvailable() || isMqttServerConnected==false){
                         generateNoteOnSD(new String(characteristic.getValue()));
                     }
                     else{
-                        isMqttServerConnected = true;
                         sendPulseToServer(new String(characteristic.getValue()));
                     }
                     Log.w(TAG,"onCharacteristicChanged");
@@ -284,13 +285,14 @@ public class BluetoothLEService extends Service {
 
     @Override
     public IBinder onBind(Intent intent) {
-        connectToMqttServer();
+        //connectToMqttServer();
         return mBinder;
     }
 
     @Override
     public boolean onUnbind(Intent intent) {
         close();
+        disconnectMqttServer();
         return super.onUnbind(intent);
     }
 
@@ -370,9 +372,10 @@ public class BluetoothLEService extends Service {
         }
     }
 
-    public void connectToMqttServer(){
+    public void connectToMqttServer(String ip,String port){
         clientId = MqttClient.generateClientId();
-        client = new MqttAndroidClient(this.getApplicationContext(), "tcp://192.168.0.122:1883",
+        String URL  = "tcp://"+ip+":"+port;
+        client = new MqttAndroidClient(this.getApplicationContext(), URL,
                 clientId);
         try {
             IMqttToken token = client.connect();
@@ -382,14 +385,15 @@ public class BluetoothLEService extends Service {
                     // We are connected
                     Log.d(TAG, "onSuccess mqtt connect");
                     isMqttServerConnected = true;
+                    sendPulseToServer("ConnectionActivated");
+                    broadcastUpdate(MQTT_CONNECTED);
+
                 }
 
                 @Override
                 public void onFailure(IMqttToken asyncActionToken, Throwable exception) {
                     // Something went wrong e.g. connection timeout or firewall problems
                     Log.d(TAG, "onFailure");
-                    isMqttServerConnected=false;
-
                 }
             });
         } catch (MqttException e) {
@@ -397,11 +401,35 @@ public class BluetoothLEService extends Service {
         }
     }
 
+    public void disconnectMqttServer(){
+
+        if(client.isConnected()) {
+            try {
+                IMqttToken token = client.disconnect();
+                token.setActionCallback(new IMqttActionListener() {
+                    @Override
+                    public void onSuccess(IMqttToken iMqttToken) {
+                        Log.d(TAG, "Successfully disconnected");
+                        broadcastUpdate(MQTT_DISCONNECTED);
+                        isMqttServerConnected = false;
+                    }
+
+                    @Override
+                    public void onFailure(IMqttToken iMqttToken, Throwable throwable) {
+                        Log.d(TAG, "Failed to disconnected " + throwable.toString());
+                    }
+                });
+            } catch (MqttException e) {
+                e.printStackTrace();
+            }
+        }
+    }
+
 
     public void sendPulseToServer(String data){
         String pulse = data;
         System.out.println("WYSYLAM DANE DO SERWERA: "+data);
-        if(pulse=="" || client.isConnected()==false){
+        if(pulse=="" || isMqttServerConnected==false){
             return;
         }
         new SendDataToServer().execute(pulse);

@@ -1,11 +1,14 @@
 package com.example.healthmeasurement;
 
 import android.app.Activity;
+import android.app.AlertDialog;
+import android.app.Dialog;
 import android.bluetooth.BluetoothGattCharacteristic;
 import android.bluetooth.BluetoothGattService;
 import android.content.BroadcastReceiver;
 import android.content.ComponentName;
 import android.content.Context;
+import android.content.DialogInterface;
 import android.content.Intent;
 import android.content.IntentFilter;
 import android.content.ServiceConnection;
@@ -13,24 +16,24 @@ import android.graphics.Color;
 import android.net.ConnectivityManager;
 import android.net.NetworkInfo;
 import android.os.Bundle;
-import android.os.Handler;
 import android.os.IBinder;
 import android.util.Log;
 import android.view.View;
+import android.widget.ImageView;
 import android.widget.TextView;
-
+import android.widget.Toast;
+import androidx.appcompat.app.AppCompatActivity;
 import com.jjoe64.graphview.DefaultLabelFormatter;
 import com.jjoe64.graphview.GraphView;
 import com.jjoe64.graphview.GridLabelRenderer;
 import com.jjoe64.graphview.series.DataPoint;
 import com.jjoe64.graphview.series.LineGraphSeries;
-
 import java.text.SimpleDateFormat;
 import java.util.ArrayList;
 import java.util.Date;
 import java.util.List;
 
-public class DeviceControlActivity extends Activity {
+public class DeviceControlActivity extends AppCompatActivity {
 
     private final static String TAG = DeviceControlActivity.class.getSimpleName();
     public boolean onCreate;
@@ -40,9 +43,10 @@ public class DeviceControlActivity extends Activity {
     private boolean mConnected;
     public static final String EXTRAS_DEVICE_NAME = "DEVICE_NAME";
     public static final String EXTRAS_DEVICE_ADDRESS = "DEVICE_ADDRESS";
-    private TextView mConnectionState;
     private TextView pulse;
     private GraphView graph;
+    private ImageView bleConnectionIcon;
+    private ImageView wifiConnectionIcon;
     private BluetoothGattCharacteristic blunoCharacteristic;
     private BluetoothGattCharacteristic mNotifyCharacteristic;
     private int i;
@@ -74,7 +78,22 @@ public class DeviceControlActivity extends Activity {
         super.onCreate(savedInstanceState);
         onCreate=true;
         setContentView(R.layout.activity_device_control);
-        mConnectionState = findViewById(R.id.mConnectionState);
+        bleConnectionIcon = findViewById(R.id.bluetoothIcon);
+        wifiConnectionIcon = findViewById(R.id.wifiIcon);
+        ImageView noWiFi = findViewById(R.id.no_wifi);
+        noWiFi.setOnClickListener(new View.OnClickListener() {
+            @Override
+            public void onClick(View v) {
+            mBluetoothLeService.disconnectMqttServer();
+            }
+        });
+        wifiConnectionIcon.setOnClickListener(new View.OnClickListener() {
+            @Override
+            public void onClick(View v) {
+                showDialog();
+            }
+        });
+
         pulse = findViewById(R.id.myImageViewText);
         graph = findViewById(R.id.graph);
         graph.getGridLabelRenderer().setGridStyle(GridLabelRenderer.GridStyle.NONE );
@@ -158,6 +177,8 @@ public class DeviceControlActivity extends Activity {
         intentFilter.addAction(BluetoothLEService.ACTION_GATT_DISCONNECTED);
         intentFilter.addAction(BluetoothLEService.ACTION_GATT_SERVICES_DISCOVERED);
         intentFilter.addAction(BluetoothLEService.ACTION_DATA_AVAILABLE);
+        intentFilter.addAction(BluetoothLEService.MQTT_CONNECTED);
+        intentFilter.addAction(BluetoothLEService.MQTT_DISCONNECTED);
         return intentFilter;
     }
 
@@ -173,13 +194,12 @@ public class DeviceControlActivity extends Activity {
             final String action = intent.getAction();
             if (BluetoothLEService.ACTION_GATT_CONNECTED.equals(action)) {
                 mConnected = true;
-                mConnectionState.setText(" Connected");
+                bleConnectionIcon.setBackgroundColor(Color.GREEN);
 
             } else if (BluetoothLEService.ACTION_GATT_DISCONNECTED.equals(action)) {
                 mConnected = false;
                 pulse.setText("0");
-                mConnectionState.setText(" Disconnected");
-
+                bleConnectionIcon.setBackgroundColor(Color.RED);
 
             } else if (BluetoothLEService.ACTION_GATT_SERVICES_DISCOVERED.equals(action)) {
 
@@ -208,6 +228,15 @@ public class DeviceControlActivity extends Activity {
                     drawGraph();
                 }
             }
+            else if (BluetoothLEService.MQTT_CONNECTED.equals(action)) {
+                wifiConnectionIcon.setBackgroundColor(Color.GREEN);
+                Toast.makeText(context, "Udało się połączyć z brokerem", Toast.LENGTH_LONG).show();
+            }
+            else if (BluetoothLEService.MQTT_DISCONNECTED.equals(action)) {
+                wifiConnectionIcon.setBackgroundColor(Color.RED);
+                Toast.makeText(context,"Rozłączono z brokerem", Toast.LENGTH_LONG).show();
+            }
+
         }
     };
 
@@ -222,25 +251,12 @@ public class DeviceControlActivity extends Activity {
                 if (ni != null && ni.isConnectedOrConnecting()) {
                     Log.i(TAG, "Network " + ni.getTypeName() + " connected");
 
-                    if(ni.getTypeName().toString().equals("WIFI")){
-
-
-
-                        final Handler handler = new Handler();
-                        handler.postDelayed(new Runnable() {
-                            @Override
-                            public void run() {
-                                mBluetoothLeService.sendPulseToServer("ConnectionActivated");
-                                if(mBluetoothLeService.isMqttServerConnected==false){
-                                    mBluetoothLeService.connectToMqttServer();
-                                }
-                            }
-                        }, 100);
-                    }
-
 
                 } else if (intent.getBooleanExtra(ConnectivityManager.EXTRA_NO_CONNECTIVITY, Boolean.FALSE)) {
                     Log.d(TAG, "There's no network connectivity");
+                    mBluetoothLeService.isMqttServerConnected=false;
+                    wifiConnectionIcon.setBackgroundColor(Color.RED);
+                    Toast.makeText(context,"Rozłączono z brokerem", Toast.LENGTH_LONG).show();
                 }
             }
 
@@ -261,6 +277,13 @@ public class DeviceControlActivity extends Activity {
 
 
     }
+
+    public void showDialog(){
+        ConnectDialog connectDialog = new ConnectDialog(mBluetoothLeService);
+        connectDialog.show(getSupportFragmentManager(),"Odpalam dialog");
+    }
+
+
 
 }
 
